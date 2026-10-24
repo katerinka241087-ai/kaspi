@@ -70,7 +70,6 @@ max_offers = 0
 best_content = ""
 
 for filename in all_files:
-    # ЖЕСТКОЕ ИСКЛЮЧЕНИЕ: Скрипт больше никогда не будет читать итоговый kaspi.xml при поиске базы!
     if filename in ["fix_prices.py", OUTPUT_XML] or os.path.isdir(filename):
         continue
     try:
@@ -132,11 +131,11 @@ for i in range(0, total_items, chunk_size):
 print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно загружены.")
 
 # 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ
-current_date = datetime.now().strftime("%Y-%m-%d")
+# ИСПРАВЛЕНО: Формат даты приведен к стандарту Kaspi (ДД.ММ.ГГГГ)
+current_date = datetime.now().strftime("%d.%m.%Y")
 
+# ИСПРАВЛЕНО: Удалены конфликтующие атрибуты, из-за которых ломалась валидация XSD
 root = ET.Element("kaspi_catalog", {
-    "xmlns": "kaspiShopping", 
-    "xmlns:xsi": "http://w3.org", 
     "date": current_date
 })
 
