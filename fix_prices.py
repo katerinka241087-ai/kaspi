@@ -22,7 +22,6 @@ KASPI_API_TOKEN = "ТВОЙ_API_КЛЮЧ_КАСПИ"
 
 # Настройки демпинга
 PRICE_STEP = 10 
-INTERVAL_HOURS = 3       # Автоматический перезапуск скрипта каждые 3 часа
 
 # Тарифы транспортной компании за доставку груза Симы до твоего города
 TARIF_PER_KG = 150       # Стоимость доставки 1 кг в тенге
@@ -59,159 +58,144 @@ def update_kaspi_price(sku, new_price):
         pass
 
 # =====================================================================
-# БЕСКОНЕЧНЫЙ ЦИКЛ АВТОМАТИЗАЦИИ
+# ОДНОКРАТНОЕ ВЫПОЛНЕНИЕ ДЛЯ ОБЛАКА GITHUB
 # =====================================================================
-while True:
-    print(f"\n=====================================================================")
-    print(f"СТАРТ СЕССИИ ОБНОВЛЕНИЯ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"=====================================================================")
+print(f"\n=====================================================================")
+print(f"СТАРТ СЕССИИ ОБНОВЛЕНИЯ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"=====================================================================")
 
-    # 1. ПОИСК ИСХОДНОГО ФАЙЛА С БАЗОЙ ТОВАРОВ
-    all_files = os.listdir(".")
-    best_file = None
-    max_offers = 0
-    best_content = ""
+# 1. ПОИСК ИСХОДНОГО ФАЙЛА С БАЗОЙ ТОВАРОВ
+all_files = os.listdir(".")
+best_file = None
+max_offers = 0
+best_content = ""
 
-    for filename in all_files:
-        if filename in ["fix_prices.py", OUTPUT_XML] or os.path.isdir(filename):
-            continue
-        try:
-            with open(filename, "r", encoding="utf-8", errors="ignore") as f:
-                test_content = f.read()
-                offers_found = re.findall(r'<offer sku="(.*?)">', test_content)
-                if len(offers_found) > max_offers:
-                    max_offers = len(offers_found)
-                    best_file = filename
-                    best_content = test_content
-        except Exception:
-            continue
-
-    if not best_file or max_offers == 0:
-        print("\n[КРИТИЧЕСКАЯ ОШИБКА] В папке не найден файл с вашей базой товаров!")
-        time.sleep(60)
+for filename in all_files:
+    if filename in ["fix_prices.py", OUTPUT_XML] or os.path.isdir(filename):
+        continue
+    try:
+        with open(filename, "r", encoding="utf-8", errors="ignore") as f:
+            test_content = f.read()
+            offers_found = re.findall(r'<offer sku="(.*?)">', test_content)
+            if len(offers_found) > max_offers:
+                max_offers = len(offers_found)
+                best_file = filename
+                best_content = test_content
+    except Exception:
         continue
 
-    # 2. ИЗВЛЕКАЕМ SKU И СТАРТОВЫЕ ЦЕНЫ ИЗ ЛОКАЛЬНОЙ БАЗЫ
-    offers_raw = re.findall(r'<offer sku="(.*?)">.*?<price>(.*?)</price>', best_content, re.DOTALL)
-    products_data = []
-    parsed_skus = set()
+if not best_file or max_offers == 0:
+    print("\n[КРИТИЧЕСКАЯ ОШИБКА] В папке не найден файл с вашей базой товаров!")
+    exit()
 
-    for sku, price in offers_raw:
-        sku_clean = sku.strip()
-        products_data.append((sku_clean, price.strip()))
-        parsed_skus.add(sku_clean)
+# 2. ИЗВЛЕКАЕМ SKU И СТАРТОВЫЕ ЦЕНЫ ИЗ ЛОКАЛЬНОЙ БАЗЫ
+offers_raw = re.findall(r'<offer sku="(.*?)">.*?<price>(.*?)</price>', best_content, re.DOTALL)
+products_data = []
+parsed_skus = set()
 
-    total_items = len(products_data)
-    print(f"[ИНФО] База '{best_file}' успешно считана ({total_items} позиций).")
+for sku, price in offers_raw:
+    sku_clean = sku.strip()
+    products_data.append((sku_clean, price.strip()))
+    parsed_skus.add(sku_clean)
 
-    # 3. ПОЛУЧЕНИЕ ДАННЫХ ИЗ API СИМА-ЛЕНД V3 (ОСТАТКИ + ГАБАРИТЫ)
-    print("[API] Запрашиваем остатки и габариты у Сима-Ленд пачками...")
-    sima_data_dict = {}
-    sku_only_list = [item for item, _ in products_data]
-    sima_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json"
-    }
+total_items = len(products_data)
+print(f"[ИНФО] База '{best_file}' успешно считана ({total_items} позиций).")
 
-    chunk_size = 50
-    total_chunks = (total_items + chunk_size - 1) // chunk_size
-    
-    for idx, i in enumerate(range(0, total_items, chunk_size), 1):
-        chunk = sku_only_list[i : i + chunk_size]
-        print(f"   Обработка пачки Симы {idx} из {total_chunks}... ", end="\r")
-        try:
-            response = requests.get("https://sima-land.ru", params={"sid": ",".join(chunk)}, headers=sima_headers, timeout=20)
-            if response.status_code == 200:
-                for item in response.json().get("items", []):
-                    sid = str(item.get("sid"))
-                    balance = item.get("balance", 0)
-                    weight = float(item.get("weight", 0))
-                    box_volume = float(item.get("box_volume", 0))
+# 3. ПОЛУЧЕНИЕ ДАННЫХ ИЗ API СИМА-ЛЕНД V3 (ОСТАТКИ + ГАБАРИТЫ)
+print("[API] Запрашиваем остатки и габариты у Сима-Ленд пачками...")
+sima_data_dict = {}
+sku_only_list = [item for item, _ in products_data]
+sima_headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json"
+}
 
-                    if isinstance(balance, str):
-                        balance_lower = balance.lower()
-                        qty = 20 if "много" in balance_lower or "достаточно" in balance_lower else (3 if "мало" in balance_lower else 0)
-                    else:
-                        qty = int(balance)
+chunk_size = 50
+total_chunks = (total_items + chunk_size - 1) // chunk_size
 
-                    sima_data_dict[sid] = {"balance": qty, "weight_kg": weight / 1000.0, "volume_m3": box_volume}
-        except Exception:
-            pass
+for idx, i in enumerate(range(0, total_items, chunk_size), 1):
+    chunk = sku_only_list[i : i + chunk_size]
+    print(f"   Обработка пачки Симы {idx} из {total_chunks}... ", end="\r")
+    try:
+        response = requests.get("https://sima-land.ru", params={"sid": ",".join(chunk)}, headers=sima_headers, timeout=20)
+        if response.status_code == 200:
+            for item in response.json().get("items", []):
+                sid = str(item.get("sid"))
+                balance = item.get("balance", 0)
+                weight = float(item.get("weight", 0))
+                box_volume = float(item.get("box_volume", 0))
 
-    print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно загружены.")
-
-    # 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ (БЕЗ ОШИБОК XSD)
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    
-    root = ET.Element("kaspi_catalog", {
-        "xmlns": "kaspiShopping", 
-        "xmlns:xsi": "http://w3.org", 
-        "date": current_date
-    })
-    
-    ET.SubElement(root, "company")
-    merchant_id = ET.SubElement(root, "merchantid")
-    merchant_id.text = MERCHANT_ID
-    offers_node = ET.SubElement(root, "offers")
-
-    preorder_count = 0
-    hidden_count = 0
-
-    print("[ПРОЦЕСС] Расчет цен и формирование XML...")
-    for sku, base_price_str in products_data:
-        offer_node = ET.SubElement(offers_node, "offer", {"sku": sku})
-        ET.SubElement(offer_node, "model").text = f"Товар {sku}"
-        ET.SubElement(offer_node, "brand").text = "Noname"
-
-        try:
-            base_price = float(base_price_str)
-        except ValueError:
-            base_price = 5000.0
-
-        item_info = sima_data_dict.get(sku, {"balance": 0, "weight_kg": 0.0, "volume_m3": 0.0})
-        shipping_surcharge = max(item_info["weight_kg"] * TARIF_PER_KG, item_info["volume_m3"] * TARIF_PER_M3)
-        total_item_cost = base_price + shipping_surcharge
-
-        min_allowed_price = round(((total_item_cost * 1.25) + 1500 + 1000) / 0.80, -1)
-        ET.SubElement(offer_node, "price").text = str(int(min_allowed_price))
-
-        if ENABLE_DUMPING and KASPI_API_TOKEN != "ТВОЙ_API_КЛЮЧ_КАСПИ":
-            competitor_price = get_kaspi_competitors(sku)
-            if competitor_price is not None:
-                target_price = competitor_price - PRICE_STEP
-                if target_price >= min_allowed_price:
-                    update_kaspi_price(sku, target_price)
+                if isinstance(balance, str):
+                    balance_lower = balance.lower()
+                    qty = 20 if "много" in balance_lower or "достаточно" in balance_lower else (3 if "мало" in balance_lower else 0)
                 else:
-                    update_kaspi_price(sku, min_allowed_price)
+                    qty = int(balance)
 
-        # ОБНОВЛЕННАЯ ЛОГИКА ОСТАТКОВ:
-        availabilities_node = ET.SubElement(offer_node, "availabilities")
-        
-        if item_info["balance"] < MIN_STOCK_THRESHOLD:
-            # Остаток на Симе меньше 5 штук -> СНИМАЕМ С ПРОДАЖИ (защита от отмен!)
-            ET.SubElement(availabilities_node, "availability", {
-                "available": "no", 
-                "storeId": "PP4"
-            })
-            hidden_count += 1
-        else:
-            # Остаток на Симе 5 штук и более -> Выставляем строго в ПРЕДЗАКАЗ НА 12 ДНЕЙ!
-            ET.SubElement(availabilities_node, "availability", {
-                "available": "yes", 
-                "storeId": "PP4", 
-                "preorder": "true", 
-                "deliveryTime": "12"
-            })
-            preorder_count += 1
+                sima_data_dict[sid] = {"balance": qty, "weight_kg": weight / 1000.0, "volume_m3": box_volume}
+    except Exception:
+        pass
 
-    # Сохраняем XML файл
-    tree = ET.ElementTree(root)
-    ET.indent(tree, space="    ", level=0)
-    tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
+print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно загружены.")
 
-    print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
-    print(f"Товаров в ПРЕДЗАКАЗЕ (12 дней): {preorder_count} | СНЯТО с продажи (остаток < 5 шт): {hidden_count}")
+# 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ (БЕЗ ОШИБОК XSD)
+current_date = datetime.now().strftime("%Y-%m-%d")
+
+root = ET.Element("kaspi_catalog", {
+    "xmlns": "kaspiShopping", 
+    "xmlns:xsi": "http://w3.org", 
+    "date": current_date
+})
+
+ET.SubElement(root, "company")
+merchant_id = ET.SubElement(root, "merchantid")
+merchant_id.text = MERCHANT_ID
+offers_node = ET.SubElement(root, "offers")
+
+preorder_count = 0
+hidden_count = 0
+
+print("[ПРОЦЕСС] Расчет цен и формирование XML...")
+for sku, base_price_str in products_data:
+    offer_node = ET.SubElement(offers_node, "offer", {"sku": sku})
+    ET.SubElement(offer_node, "model").text = f"Товар {sku}"
+    ET.SubElement(offer_node, "brand").text = "Noname"
+
+    try:
+        base_price = float(base_price_str)
+    except ValueError:
+        base_price = 5000.0
+
+    item_info = sima_data_dict.get(sku, {"balance": 0, "weight_kg": 0.0, "volume_m3": 0.0})
+    shipping_surcharge = max(item_info["weight_kg"] * TARIF_PER_KG, item_info["volume_m3"] * TARIF_PER_M3)
+    total_item_cost = base_price + shipping_surcharge
+
+    min_allowed_price = round(((total_item_cost * 1.25) + 1500 + 1000) / 0.80, -1)
+    ET.SubElement(offer_node, "price").text = str(int(min_allowed_price))
+
+    if ENABLE_DUMPING and KASPI_API_TOKEN != "ТВОЙ_API_КЛЮЧ_КАСПИ":
+        competitor_price = get_kaspi_competitors(sku)
+        if competitor_price is not None:
+            target_price = competitor_price - PRICE_STEP
+            if target_price >= min_allowed_price:
+                update_kaspi_price(sku, target_price)
+            else:
+                update_kaspi_price(sku, min_allowed_price)
+
+    availabilities_node = ET.SubElement(offer_node, "availabilities")
     
-    # Режим ожидания
-    print(f"\nЖдем {INTERVAL_HOURS} часа(ов) до следующей проверки... Не закрывайте это окно.")
-    time.sleep(INTERVAL_HOURS * 3600)
+    if item_info["balance"] < MIN_STOCK_THRESHOLD:
+        # Скрываем
+        ET.SubElement(availabilities_node, "availability", {"available": "no", "storeId": "PP4"})
+        hidden_count += 1
+    else:
+        # Выставляем строго в предзаказ на 12 дней
+        ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
+        preorder_count += 1
+
+# Сохраняем XML файл
+tree = ET.ElementTree(root)
+ET.indent(tree, space="    ", level=0)
+tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
+
+print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
+print(f"Товаров в ПРЕДЗАКАЗЕ (12 дней): {preorder_count} | СНЯТО с продажи (остаток < 5 шт): {hidden_count}")
