@@ -11,6 +11,7 @@ import requests
 # =====================================================================
 OUTPUT_XML = "kaspi.xml"
 MERCHANT_ID = "30332535"
+MIN_STOCK_THRESHOLD = 5  # Критический порог: если остаток на Симе < 5, полностью снимаем с продажи!
 
 # --- НАСТРОЙКА РЕЖИМА РАБОТЫ ---
 # Временно выключен демпинг, пока товары не распознаны. Как одобрят — поменяй False на True!
@@ -183,11 +184,18 @@ while True:
                 else:
                     update_kaspi_price(sku, min_allowed_price)
 
-        # ЛОГИКА ТОТАЛЬНОГО ПРЕДЗАКАЗА (ИСПРАВЛЕНО ПОД ТВОЮ СТРАТЕГИЮ):
+        # ОБНОВЛЕННАЯ ЛОГИКА ОСТАТКОВ:
         availabilities_node = ET.SubElement(offer_node, "availabilities")
         
-        if item_info["balance"] > 0:
-            # ТОВАР ЕСТЬ НА СИМЕ -> Абсолютно всегда включаем ПРЕДЗАКАЗ НА 12 ДНЕЙ!
+        if item_info["balance"] < MIN_STOCK_THRESHOLD:
+            # Остаток на Симе меньше 5 штук -> СНИМАЕМ С ПРОДАЖИ (защита от отмен!)
+            ET.SubElement(availabilities_node, "availability", {
+                "available": "no", 
+                "storeId": "PP4"
+            })
+            hidden_count += 1
+        else:
+            # Остаток на Симе 5 штук и более -> Выставляем строго в ПРЕДЗАКАЗ НА 12 ДНЕЙ!
             ET.SubElement(availabilities_node, "availability", {
                 "available": "yes", 
                 "storeId": "PP4", 
@@ -195,13 +203,6 @@ while True:
                 "deliveryTime": "12"
             })
             preorder_count += 1
-        else:
-            # ТОВАРА НЕТ НА СИМЕ -> Скрываем карточку, чтобы избежать штрафов от Каспи
-            ET.SubElement(availabilities_node, "availability", {
-                "available": "no", 
-                "storeId": "PP4"
-            })
-            hidden_count += 1
 
     # Сохраняем XML файл
     tree = ET.ElementTree(root)
@@ -209,7 +210,7 @@ while True:
     tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
 
     print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
-    print(f"Товаров выставлено в ПРЕДЗАКАЗ (12 дней): {preorder_count} | Полностью скрыто (0 на Симе): {hidden_count}")
+    print(f"Товаров в ПРЕДЗАКАЗЕ (12 дней): {preorder_count} | СНЯТО с продажи (остаток < 5 шт): {hidden_count}")
     
     # Режим ожидания
     print(f"\nЖдем {INTERVAL_HOURS} часа(ов) до следующей проверки... Не закрывайте это окно.")
