@@ -19,7 +19,7 @@ MIN_STOCK_THRESHOLD = 5  # Если остаток на Симе < 5, полно
 ENABLE_DUMPING = False  
 
 # --- СЕКРЕТНЫЙ API КЛЮЧ КАСПИ ---
-KASPI_API_TOKEN = "ТВОЙ_API_КЛЮЧ_КАСПИ" 
+KASPI_API_TOKEN = "WCE/VD+TtNxNtL2IVcanwULSJxjn1vJLjB9EBMHW2zI=" 
 
 # Настройки демпинга
 PRICE_STEP = 10 
