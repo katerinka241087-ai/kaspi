@@ -11,14 +11,13 @@ import requests
 # =====================================================================
 OUTPUT_XML = "kaspi.xml"
 MERCHANT_ID = "30332535"
-MIN_STOCK_THRESHOLD = 5  # Если остаток на Симе < 5, переводим в Предзаказ 12 дней
 
 # --- НАСТРОЙКА РЕЖИМА РАБОТЫ ---
 # Временно выключен демпинг, пока товары не распознаны. Как одобрят — поменяй False на True!
 ENABLE_DUMPING = False  
 
 # --- СЕКРЕТНЫЙ API КЛЮЧ КАСПИ ---
-KASPI_API_TOKEN = "WCE/VD+TtNxNtL2IVcanwULSJxjn1vJLjB9EBMHW2zI=" 
+KASPI_API_TOKEN = "ТВОЙ_API_КЛЮЧ_КАСПИ" 
 
 # Настройки демпинга
 PRICE_STEP = 10 
@@ -140,10 +139,9 @@ while True:
 
     print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно загружены.")
 
-    # 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ (ЕСЛИ ВКЛЮЧЕН)
+    # 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ (БЕЗ ОШИБОК XSD)
     current_date = datetime.now().strftime("%Y-%m-%d")
     
-    # СТРОЖАЙШЕЕ ИСПРАВЛЕНИЕ: Оставлены только чистые валидные атрибуты для Kaspi XSD схемы
     root = ET.Element("kaspi_catalog", {
         "xmlns": "kaspiShopping", 
         "xmlns:xsi": "http://w3.org", 
@@ -156,7 +154,7 @@ while True:
     offers_node = ET.SubElement(root, "offers")
 
     preorder_count = 0
-    active_count = 0
+    hidden_count = 0
 
     print("[ПРОЦЕСС] Расчет цен и формирование XML...")
     for sku, base_price_str in products_data:
@@ -185,13 +183,25 @@ while True:
                 else:
                     update_kaspi_price(sku, min_allowed_price)
 
+        # ЛОГИКА ТОТАЛЬНОГО ПРЕДЗАКАЗА (ИСПРАВЛЕНО ПОД ТВОЮ СТРАТЕГИЮ):
         availabilities_node = ET.SubElement(offer_node, "availabilities")
-        if item_info["balance"] < MIN_STOCK_THRESHOLD:
-            ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
+        
+        if item_info["balance"] > 0:
+            # ТОВАР ЕСТЬ НА СИМЕ -> Абсолютно всегда включаем ПРЕДЗАКАЗ НА 12 ДНЕЙ!
+            ET.SubElement(availabilities_node, "availability", {
+                "available": "yes", 
+                "storeId": "PP4", 
+                "preorder": "true", 
+                "deliveryTime": "12"
+            })
             preorder_count += 1
         else:
-            ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "stockCount": str(item_info["balance"])})
-            active_count += 1
+            # ТОВАРА НЕТ НА СИМЕ -> Скрываем карточку, чтобы избежать штрафов от Каспи
+            ET.SubElement(availabilities_node, "availability", {
+                "available": "no", 
+                "storeId": "PP4"
+            })
+            hidden_count += 1
 
     # Сохраняем XML файл
     tree = ET.ElementTree(root)
@@ -199,7 +209,7 @@ while True:
     tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
 
     print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
-    print(f"В наличии: {active_count} | В предзаказе (12 дней): {preorder_count}")
+    print(f"Товаров выставлено в ПРЕДЗАКАЗ (12 дней): {preorder_count} | Полностью скрыто (0 на Симе): {hidden_count}")
     
     # Режим ожидания
     print(f"\nЖдем {INTERVAL_HOURS} часа(ов) до следующей проверки... Не закрывайте это окно.")
