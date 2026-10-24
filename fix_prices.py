@@ -14,8 +14,6 @@ MERCHANT_ID = "30332535"
 MIN_STOCK_THRESHOLD = 5  # Если остаток на Симе < 5, полностью снимаем с продажи
 
 # --- НАСТРОЙКА РЕЖИМА РАБОТЫ ---
-# Пока карточки привязываются, оставляем False. Скрипт будет ставить цену с наценкой 135%!
-# Как только все товары привяжутся и встанут на витрину — поменяй на True, и включится демпинг!
 ENABLE_DUMPING = False  
 
 # --- СЕКРЕТНЫЙ API КЛЮЧ КАСПИ ---
@@ -65,13 +63,14 @@ print(f"\n====================================================================="
 print(f"СТАРТ СЕССИИ ОБНОВЛЕНИЯ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"=====================================================================")
 
-# 1. ПОИСК ИСХОДНОГО ФАЙЛА С БАЗОЙ ТОВАРОВ
+# 1. ПОИСК ИСХОДНОГО ФАЙЛА С БАЗОЙ ТОВАРОВ (ИГНОРИРУЕМ СТАРЫЙ OUTPUT_XML)
 all_files = os.listdir(".")
 best_file = None
 max_offers = 0
 best_content = ""
 
 for filename in all_files:
+    # ЖЕСТКОЕ ИСКЛЮЧЕНИЕ: Скрипт больше никогда не будет читать итоговый kaspi.xml при поиске базы!
     if filename in ["fix_prices.py", OUTPUT_XML] or os.path.isdir(filename):
         continue
     try:
@@ -155,25 +154,18 @@ for sku, base_price_str in products_data:
     ET.SubElement(offer_node, "model").text = f"Товар {sku}"
     ET.SubElement(offer_node, "brand").text = "Noname"
 
-    # Истинная цена закупа с Сима-ленда (извлекается из базы)
     try:
         base_price = float(base_price_str)
     except ValueError:
         base_price = 5000.0
 
-    # Считаем доставку за габариты
     item_info = sima_data_dict.get(sku, {"balance": 0, "weight_kg": 0.0, "volume_m3": 0.0})
     shipping_surcharge = max(item_info["weight_kg"] * TARIF_PER_KG, item_info["volume_m3"] * TARIF_PER_M3)
     total_item_cost = base_price + shipping_surcharge
 
-    # 🛑 РАСЧЕТ ИТОГОВОЙ РОЗНИЧНОЙ ЦЕНЫ НА ВИТРИНУ:
-    # Минимальный порог защиты (красная линия):
     min_allowed_price = round(((total_item_cost * 1.25) + 1500 + 1000) / 0.80, -1)
-    
-    # Стартовая цена продажи для витрины (себестоимость + 135% наценка)
     start_selling_price = round(total_item_cost * 2.35, -1)
 
-    # ЛОГИКА ВЫБОРА ТЕКУЩЕЙ ЦЕНЫ
     final_xml_price = start_selling_price
 
     if ENABLE_DUMPING and KASPI_API_TOKEN != "ТВОЙ_API_КЛЮЧ_КАСПИ":
@@ -187,10 +179,8 @@ for sku, base_price_str in products_data:
                 final_xml_price = min_allowed_price
                 update_kaspi_price(sku, min_allowed_price)
 
-    # Пишем правильную расчетную цену в XML вместо фиксированных 5000 тенге!
     ET.SubElement(offer_node, "price").text = str(int(final_xml_price))
 
-    # Логика остатков и предзаказа
     availabilities_node = ET.SubElement(offer_node, "availabilities")
     if item_info["balance"] < MIN_STOCK_THRESHOLD:
         ET.SubElement(availabilities_node, "availability", {"available": "no", "storeId": "PP4"})
