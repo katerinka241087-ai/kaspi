@@ -11,10 +11,11 @@ import requests
 # =====================================================================
 OUTPUT_XML = "kaspi.xml"
 MERCHANT_ID = "30332535"
-MIN_STOCK_THRESHOLD = 5  # Критический порог: если остаток на Симе < 5, полностью снимаем с продажи!
+MIN_STOCK_THRESHOLD = 5  # Если остаток на Симе < 5, полностью снимаем с продажи
 
 # --- НАСТРОЙКА РЕЖИМА РАБОТЫ ---
-# Временно выключен демпинг, пока товары не распознаны. Как одобрят — поменяй False на True!
+# Пока карточки привязываются, оставляем False. Скрипт будет ставить цену с наценкой 135%!
+# Как только все товары привяжутся и встанут на витрину — поменяй на True, и включится демпинг!
 ENABLE_DUMPING = False  
 
 # --- СЕКРЕТНЫЙ API КЛЮЧ КАСПИ ---
@@ -88,15 +89,12 @@ if not best_file or max_offers == 0:
     print("\n[КРИТИЧЕСКАЯ ОШИБКА] В папке не найден файл с вашей базой товаров!")
     exit()
 
-# 2. ИЗВЛЕКАЕМ SKU И СТАРТОВЫЕ ЦЕНЫ ИЗ ЛОКАЛЬНОЙ БАЗЫ
+# 2. ИЗВЛЕКАЕМ SKU И ИСХОДНЫЕ ЦЕНЫ ИЗ ЛОКАЛЬНОЙ БАЗЫ
 offers_raw = re.findall(r'<offer sku="(.*?)">.*?<price>(.*?)</price>', best_content, re.DOTALL)
 products_data = []
-parsed_skus = set()
 
 for sku, price in offers_raw:
-    sku_clean = sku.strip()
-    products_data.append((sku_clean, price.strip()))
-    parsed_skus.add(sku_clean)
+    products_data.append((sku.strip(), price.strip()))
 
 total_items = len(products_data)
 print(f"[ИНФО] База '{best_file}' успешно считана ({total_items} позиций).")
@@ -111,11 +109,8 @@ sima_headers = {
 }
 
 chunk_size = 50
-total_chunks = (total_items + chunk_size - 1) // chunk_size
-
-for idx, i in enumerate(range(0, total_items, chunk_size), 1):
+for i in range(0, total_items, chunk_size):
     chunk = sku_only_list[i : i + chunk_size]
-    print(f"   Обработка пачки Симы {idx} из {total_chunks}... ", end="\r")
     try:
         response = requests.get("https://sima-land.ru", params={"sid": ",".join(chunk)}, headers=sima_headers, timeout=20)
         if response.status_code == 200:
@@ -137,7 +132,7 @@ for idx, i in enumerate(range(0, total_items, chunk_size), 1):
 
 print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно загружены.")
 
-# 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ (БЕЗ ОШИБОК XSD)
+# 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ
 current_date = datetime.now().strftime("%Y-%m-%d")
 
 root = ET.Element("kaspi_catalog", {
@@ -160,35 +155,47 @@ for sku, base_price_str in products_data:
     ET.SubElement(offer_node, "model").text = f"Товар {sku}"
     ET.SubElement(offer_node, "brand").text = "Noname"
 
+    # Истинная цена закупа с Сима-ленда (извлекается из базы)
     try:
         base_price = float(base_price_str)
     except ValueError:
         base_price = 5000.0
 
+    # Считаем доставку за габариты
     item_info = sima_data_dict.get(sku, {"balance": 0, "weight_kg": 0.0, "volume_m3": 0.0})
     shipping_surcharge = max(item_info["weight_kg"] * TARIF_PER_KG, item_info["volume_m3"] * TARIF_PER_M3)
     total_item_cost = base_price + shipping_surcharge
 
+    # 🛑 РАСЧЕТ ИТОГОВОЙ РОЗНИЧНОЙ ЦЕНЫ НА ВИТРИНУ:
+    # Минимальный порог защиты (красная линия):
     min_allowed_price = round(((total_item_cost * 1.25) + 1500 + 1000) / 0.80, -1)
-    ET.SubElement(offer_node, "price").text = str(int(min_allowed_price))
+    
+    # Стартовая цена продажи для витрины (себестоимость + 135% наценка)
+    start_selling_price = round(total_item_cost * 2.35, -1)
+
+    # ЛОГИКА ВЫБОРА ТЕКУЩЕЙ ЦЕНЫ
+    final_xml_price = start_selling_price
 
     if ENABLE_DUMPING and KASPI_API_TOKEN != "ТВОЙ_API_КЛЮЧ_КАСПИ":
         competitor_price = get_kaspi_competitors(sku)
         if competitor_price is not None:
             target_price = competitor_price - PRICE_STEP
             if target_price >= min_allowed_price:
+                final_xml_price = target_price
                 update_kaspi_price(sku, target_price)
             else:
+                final_xml_price = min_allowed_price
                 update_kaspi_price(sku, min_allowed_price)
 
+    # Пишем правильную расчетную цену в XML вместо фиксированных 5000 тенге!
+    ET.SubElement(offer_node, "price").text = str(int(final_xml_price))
+
+    # Логика остатков и предзаказа
     availabilities_node = ET.SubElement(offer_node, "availabilities")
-    
     if item_info["balance"] < MIN_STOCK_THRESHOLD:
-        # Скрываем
         ET.SubElement(availabilities_node, "availability", {"available": "no", "storeId": "PP4"})
         hidden_count += 1
     else:
-        # Выставляем строго в предзаказ на 12 дней
         ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
         preorder_count += 1
 
@@ -198,4 +205,3 @@ ET.indent(tree, space="    ", level=0)
 tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
 
 print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
-print(f"Товаров в ПРЕДЗАКАЗЕ (12 дней): {preorder_count} | СНЯТО с продажи (остаток < 5 шт): {hidden_count}")
