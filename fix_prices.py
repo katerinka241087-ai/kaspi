@@ -14,8 +14,7 @@ MERCHANT_ID = "30332535"
 MIN_STOCK_THRESHOLD = 5  # Если остаток на Симе < 5, переводим в Предзаказ 12 дней
 
 # --- НАСТРОЙКА РЕЖИМА РАБОТЫ ---
-# ВРЕМЕННО ВЫКЛЮЧАЕМ ДЕМПИНГ, пока товаров нет на продаже, чтобы скрипт не тупил.
-# Как только Kaspi примет твой прайс-лист — поменяй False на True!
+# Временно выключен демпинг, пока товары не распознаны. Как одобрят — поменяй False на True!
 ENABLE_DUMPING = False  
 
 # --- СЕКРЕТНЫЙ API КЛЮЧ КАСПИ ---
@@ -143,7 +142,14 @@ while True:
 
     # 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ (ЕСЛИ ВКЛЮЧЕН)
     current_date = datetime.now().strftime("%Y-%m-%d")
-    root = ET.Element("kaspi_catalog", {"xmlns": "kaspiShopping", "xmlns:xsi": "http://w3.org", "date": current_date, "xsi:schemaLocation": "kaspiShopping http://kaspi.kz"})
+    
+    # СТРОЖАЙШЕЕ ИСПРАВЛЕНИЕ: Оставлены только чистые валидные атрибуты для Kaspi XSD схемы
+    root = ET.Element("kaspi_catalog", {
+        "xmlns": "kaspiShopping", 
+        "xmlns:xsi": "http://w3.org", 
+        "date": current_date
+    })
+    
     ET.SubElement(root, "company")
     merchant_id = ET.SubElement(root, "merchantid")
     merchant_id.text = MERCHANT_ID
@@ -170,7 +176,6 @@ while True:
         min_allowed_price = round(((total_item_cost * 1.25) + 1500 + 1000) / 0.80, -1)
         ET.SubElement(offer_node, "price").text = str(int(min_allowed_price))
 
-        # ОНЛАЙН-ДЕМПИНГ ПО API (РАБОТАЕТ ТОЛЬКО ЕСЛИ ENABLE_DUMPING = True)
         if ENABLE_DUMPING and KASPI_API_TOKEN != "ТВОЙ_API_КЛЮЧ_КАСПИ":
             competitor_price = get_kaspi_competitors(sku)
             if competitor_price is not None:
@@ -180,7 +185,6 @@ while True:
                 else:
                     update_kaspi_price(sku, min_allowed_price)
 
-        # Логика остатков и перевода отсутствующих в предзаказ на 12 дней
         availabilities_node = ET.SubElement(offer_node, "availabilities")
         if item_info["balance"] < MIN_STOCK_THRESHOLD:
             ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
