@@ -136,6 +136,9 @@ current_date = datetime.now().strftime("%d.%m.%Y")
 
 # ИСПРАВЛЕНО: Удалены конфликтующие атрибуты, из-за которых ломалась валидация XSD
 root = ET.Element("kaspi_catalog", {
+    "xmlns": "http://kaspi.kz",
+    "xmlns:xsi": "http://w3.org",
+    "xsi:schemaLocation": "http://kaspi.kz http://kaspi.kz.xsd",
     "date": current_date
 })
 
