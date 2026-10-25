@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import requests
 
 # =====================================================================
-# НАСТРОЙКИ КАСПИ И ТАРИФОВ ДОСТАВКИ СИМА-ЛЕНД
+# НАСТНОЙКИ КАСПИ И ТАРИФОВ ДОСТАВКИ СИМА-ЛЕНД
 # =====================================================================
 OUTPUT_XML = "kaspi.xml"
 MERCHANT_ID = "30332535"
@@ -63,14 +63,15 @@ print(f"\n====================================================================="
 print(f"СТАРТ СЕССИИ ОБНОВЛЕНИЯ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"=====================================================================")
 
-# 1. ПОИСК ИСХОДНОГО ФАЙЛА С БАЗОЙ ТОВАРОВ (ИГНОРИРУЕМ СТАРЫЙ OUTPUT_XML)
+# 1. ПОИСК ИСХОДНОГО ФАЙЛА С БАЗОЙ ТОВАРОВ
 all_files = os.listdir(".")
 best_file = None
 max_offers = 0
 best_content = ""
 
 for filename in all_files:
-    if filename in ["fix_prices.py", OUTPUT_XML] or os.path.isdir(filename):
+    # ИСПРАВЛЕНО: Теперь скрипт игнорирует ТОЛЬКО себя и строго имя kaspi.xml, не трогая sima.xml.xml
+    if filename == "fix_prices.py" or filename == OUTPUT_XML or os.path.isdir(filename):
         continue
     try:
         with open(filename, "r", encoding="utf-8", errors="ignore") as f:
@@ -87,6 +88,8 @@ if not best_file or max_offers == 0:
     print("\n[КРИТИЧЕСКАЯ ОШИБКА] В папке не найден файл с вашей базой товаров!")
     exit()
 
+print(f"[ИНФО] Выбран файл базы товаров: '{best_file}'")
+
 # 2. ИЗВЛЕКАЕМ SKU И ИСХОДНЫЕ ЦЕНЫ ИЗ ЛОКАЛЬНОЙ БАЗЫ
 offers_raw = re.findall(r'<offer sku="(.*?)">.*?<price>(.*?)</price>', best_content, re.DOTALL)
 products_data = []
@@ -95,7 +98,7 @@ for sku, price in offers_raw:
     products_data.append((sku.strip(), price.strip()))
 
 total_items = len(products_data)
-print(f"[ИНФО] База '{best_file}' успешно считана ({total_items} позиций).")
+print(f"[ИНФО] База успешно считана ({total_items} позиций).")
 
 # 3. ПОЛУЧЕНИЕ ДАННЫХ ИЗ API СИМА-ЛЕНД V3 (ОСТАТКИ + ГАБАРИТЫ)
 print("[API] Запрашиваем остатки и габариты у Сима-Ленд пачками...")
@@ -181,7 +184,7 @@ for sku, base_price_str in products_data:
         ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
 
 # =====================================================================
-# ФИНАЛЬНАЯ ЗАПИСЬ В ФАЙЛ (ЧИСТЫЙ ТЕКСТ БЕЗ КОСЯКОВ ЛИБРАРИЙ PYTHON)
+# ФИНАЛЬНАЯ ЗАПИСЬ В ФАЙЛ
 # =====================================================================
 raw_xml_bytes = ET.tostring(root, encoding="utf-8")
 raw_xml_text = raw_xml_bytes.decode("utf-8")
@@ -190,7 +193,6 @@ raw_xml_text = re.sub(r'^<kaspi_catalog[^>]*>', '', raw_xml_text)
 raw_xml_text = re.sub(r'<\?xml[^>]*\?>', '', raw_xml_text)
 raw_xml_text = raw_xml_text.strip()
 
-# ЭТАЛОННАЯ ШАПКА: Все ссылки и кавычки защищены от сбоев интерпретатора
 perfect_header = (
     '<?xml version="1.0" encoding="utf-8"?>\n'
     f'<kaspi_catalog date="{current_date}" xmlns="http://kaspi.kz" '
@@ -207,7 +209,6 @@ else:
 with open(OUTPUT_XML, "w", encoding="utf-8") as f:
     f.write(final_output)
 
-# Дописываем уникальную временную метку для форсирования коммита в репозиторий
 with open(OUTPUT_XML, "a", encoding="utf-8") as f:
     f.write(f"\n<!-- ForceUpdate: {timestamp_comment} -->")
 
