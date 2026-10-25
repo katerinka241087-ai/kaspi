@@ -131,16 +131,9 @@ for i in range(0, total_items, chunk_size):
 print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно загружены.")
 
 # 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ
-# ИСПРАВЛЕНО: Формат даты приведен к стандарту Kaspi (ДД.ММ.ГГГГ)
 current_date = datetime.now().strftime("%d.%m.%Y")
 
-# ИСПРАВЛЕНО: Удалены конфликтующие атрибуты, из-за которых ломалась валидация XSD
-root = ET.Element("kaspi_catalog", {
-    "xmlns": "http://kaspi.kz",
-    "xmlns:xsi": "http://w3.org",
-    "xsi:schemaLocation": "http://kaspi.kz http://kaspi.kz.xsd",
-    "date": current_date
-})
+root = ET.Element("kaspi_catalog")
 
 ET.SubElement(root, "company")
 merchant_id = ET.SubElement(root, "merchantid")
@@ -191,17 +184,28 @@ for sku, base_price_str in products_data:
         ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
         preorder_count += 1
 
-# Сохраняем XML файл
+# Сохраняем XML файл с принудительной текстовой сборкой правильной шапки Kaspi
+tree = ET.ElementTree(root)
+ET.indent(tree, space="    ", level=0)
+
 temp_file = "temp_kaspi.xml"
 tree.write(temp_file, encoding="utf-8", xml_declaration=True)
 
 with open(temp_file, "r", encoding="utf-8") as f:
     xml_content = f.read()
 
+# Вырезаем пустой тег каталога, сгенерированный Python
 xml_content = re.sub(r'<kaspi_catalog[^>]*>', '', xml_content)
 
-final_xml_header = f'<?xml version="1.0" encoding="utf-8"?>\n<kaspi_catalog date="{current_date}" xmlns="kaspiShopping" xmlns:xsi="http://w3.org" xsi:schemaLocation="kaspiShopping http://kaspi.kz">'
+# Собираем идеальный заголовок строго по спецификации Kaspi XSD
+final_xml_header = (
+    f'<?xml version="1.0" encoding="utf-8"?>\n'
+    f'<kaspi_catalog date="{current_date}" xmlns="http://kaspi.kz" '
+    f'xmlns:xsi="http://w3.org" '
+    f'xsi:schemaLocation="http://kaspi.kz http://kaspi.kz.xsd">'
+)
 
+# Выполняем чистую замену
 final_content = xml_content.replace("""<?xml version='1.0' encoding='utf-8'?>""", final_xml_header)
 final_content = final_content.replace("""<?xml version="1.0" encoding="utf-8"?>""", final_xml_header)
 
@@ -212,4 +216,3 @@ if os.path.exists(temp_file):
     os.remove(temp_file)
 
 print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
-
