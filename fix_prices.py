@@ -1,38 +1,17 @@
 from datetime import datetime
 import os
-import re
-import subprocess
-import time
 import xml.etree.ElementTree as ET
 import requests
 
-# =====================================================================
-# НАСТРОЙКИ КАСПИ И ТАРИФОВ ДОСТАВКИ СИМА-ЛЕНД
-# =====================================================================
 OUTPUT_XML = "kaspi.xml"
 MERCHANT_ID = "30332535"
-MIN_STOCK_THRESHOLD = 5  # Если остаток на Симе < 5, полностью снимаем с продажи
+MIN_STOCK_THRESHOLD = 5
+KASPI_API_TOKEN = "WCE/VD+TtNxNtL2IVcanwULSJxjn1vJLjB9EBMHW2zI="
+PRICE_STEP = 10
+TARIF_PER_KG = 150
+TARIF_PER_M3 = 45000
 
-# --- НАСТРОЙКА РЕЖИМА РАБОТЫ ---
-ENABLE_DUMPING = False  
-
-# --- СЕКРЕТНЫЙ API КЛЮЧ КАСПИ ---
-KASPI_API_TOKEN = "WCE/VD+TtNxNtL2IVcanwULSJxjn1vJLjB9EBMHW2zI=" 
-
-# Настройки демпинга
-PRICE_STEP = 10 
-
-# Тарифы транспортной компании за доставку груза Симы до твоего города
-TARIF_PER_KG = 150       # Стоимость доставки 1 кг в тенге
-TARIF_PER_M3 = 45000     # Стоимость доставки 1 кубического метра в тенге
-
-# =====================================================================
-# ФУНКЦИИ ДЛЯ РАБОТЫ С API КАСПИ (ДЕМПИНГ)
-# =====================================================================
-kaspi_headers = {
-    "X-Auth-Token": KASPI_API_TOKEN,
-    "Content-Type": "application/json"
-}
+kaspi_headers = {"X-Auth-Token": KASPI_API_TOKEN, "Content-Type": "application/json"}
 
 def get_kaspi_competitors(sku):
     url = "https://kaspi.kz"
@@ -42,9 +21,9 @@ def get_kaspi_competitors(sku):
         if response.status_code == 200:
             offers = response.json().get("data", [])
             other_offers = [o for o in offers if str(o.get("merchantId")) != str(MERCHANT_ID)]
-            if other_offers:
+            if other_offers: 
                 return min(float(o.get("price", 999999)) for o in other_offers)
-    except Exception:
+    except Exception: 
         pass
     return None
 
@@ -53,172 +32,82 @@ def update_kaspi_price(sku, new_price):
     payload = {"data": {"sku": str(sku).strip(), "price": int(new_price)}}
     try:
         requests.post(url, json=payload, headers=kaspi_headers, timeout=5)
-    except Exception:
+    except Exception: 
         pass
 
-# =====================================================================
-# ОДНОКРАТНОЕ ВЫПОЛНЕНИЕ ДЛЯ ОБЛАКА GITHUB
-# =====================================================================
-print(f"\n=====================================================================")
-print(f"СТАРТ СЕССИИ ОБНОВЛЕНИЯ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"=====================================================================")
-
 base_file_name = "sima.xml.xml"
-
-if not os.path.exists(base_file_name):
-    print(f"\n[КРИТИЧЕСКАЯ ОШИБКА] Файл '{base_file_name}' отсутствует в корне репозитория!")
+if not os.path.exists(base_file_name): 
     exit()
 
-try:
-    with open(base_file_name, "r", encoding="utf-8", errors="ignore") as f:
-        best_content = f.read()
-except Exception as e:
-    print(f"\n[КРИТИЧЕСКАЯ ОШИБКА] Не удалось прочитать файл базы: {e}")
-    exit()
+tree = ET.parse(base_file_name)
+root = tree.getroot()
 
-# ВСЕЯДНЫЙ ПОИСК: Ищет любые вариации тегов Сима-Ленд (offer, item, product) и любые артикулы (sid, sku, id)
 products_data = []
+for item in root.findall('.//item'):
+    sid = item.get('sid') or item.get('id') or item.get('sku')
+    price_element = item.find('.//price') or item.find('.//price_ru') or item.find('.//value')
+    price = price_element.text if price_element is not None else None
+    if sid and price:
+        products_data.append((sid.strip(), price.strip()))
 
-# Вариант 1: Ищем стандартные теги Сима-Ленд <item sid="..." ...> <price>...</price>
-items_raw = re.findall(r'<item[^>]*sid="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
-for sku, price in items_raw:
-    products_data.append((sku.strip(), price.strip()))
-
-# Вариант 2: Если не нашли, ищем <offer sku="..."> <price>...</price>
-if not products_data:
-    offers_raw = re.findall(r'<offer[^>]*sku="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
-    for sku, price in offers_raw:
-        products_data.append((sku.strip(), price.strip()))
-
-# Вариант 3: Если не нашли, ищем <offer id="..."> <price>...</price>
-if not products_data:
-    offers_id_raw = re.findall(r'<offer[^>]*id="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
-    for sku, price in offers_id_raw:
-        products_data.append((sku.strip(), price.strip()))
-
-# Вариант 4: Самый глубокий поиск по любым артикулам sid="число" и цене
-if not products_data:
-    universal_raw = re.finditer(r'sid="(\d+)".*?<price>([\d.]+)</price>', best_content, re.DOTALL)
-    for match in universal_raw:
-        products_data.append((match.group(1), match.group(2)))
-
-if not products_data:
-    print("\n[КРИТИЧЕСКАЯ ОШИБКА] Скрипт не смог распознать структуру товаров в вашем XML. Проверьте теги цены и артикула!")
+if not products_data: 
     exit()
 
-total_items = len(products_data)
-print(f"[ИНФО] База '{base_file_name}' успешно распознана и считана ({total_items} позиций).")
-
-# 3. ПОЛУЧЕНИЕ ДАННЫХ ИЗ API СИМА-ЛЕНД V3 (ОСТАТКИ + ГАБАРИТЫ)
-print("[API] Запрашиваем остатки и габариты у Сима-Ленд пачками...")
 sima_data_dict = {}
 sku_only_list = [item for item, _ in products_data]
-sima_headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json"
-}
-
+sima_headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 chunk_size = 50
-for i in range(0, total_items, chunk_size):
-    chunk = sku_only_list[i : i + chunk_size]
+for i in range(0, len(products_data), chunk_size):
+    chunk = sku_only_list[i: i + chunk_size]
     try:
         response = requests.get("https://sima-land.ru", params={"sid": ",".join(chunk)}, headers=sima_headers, timeout=20)
         if response.status_code == 200:
             for item in response.json().get("items", []):
                 sid = str(item.get("sid"))
                 balance = item.get("balance", 0)
-                weight = float(item.get("weight", 0))
-                box_volume = float(item.get("box_volume", 0))
-
-                if isinstance(balance, str):
-                    balance_lower = balance.lower()
-                    qty = 20 if "много" in balance_lower or "достаточно" in balance_lower else (3 if "мало" in balance_lower else 0)
-                else:
-                    qty = int(balance)
-
-                sima_data_dict[sid] = {"balance": qty, "weight_kg": weight / 1000.0, "volume_m3": box_volume}
-    except Exception:
+                qty = 20 if isinstance(balance, str) and ("много" in balance.lower() or "достаточно" in balance.lower()) else (3 if isinstance(balance, str) and "мало" in balance.lower() else int(balance))
+                sima_data_dict[sid] = {
+                    "balance": qty,
+                    "weight_kg": float(item.get("weight", 0)) / 1000.0,
+                    "volume_m3": float(item.get("box_volume", 0))
+                }
+    except Exception: 
         pass
 
-print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно загружены.")
-
-# 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ
 current_date = datetime.now().strftime("%d.%m.%Y")
-timestamp_comment = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-
-root = ET.Element("kaspi_catalog")
-
-ET.SubElement(root, "company")
-merchant_id = ET.SubElement(root, "merchantid")
+root_kaspi = ET.Element("kaspi_catalog", {"date": current_date, "xmlns": "http://kaspi.kz", "xmlns:xsi": "http://w3.org", "xsi:schemaLocation": "http://kaspi.kz http://kaspi.kz.xsd"})
+ET.SubElement(root_kaspi, "company")
+merchant_id = ET.SubElement(root_kaspi, "merchantid")
 merchant_id.text = MERCHANT_ID
-offers_node = ET.SubElement(root, "offers")
+offers_node = ET.SubElement(root_kaspi, "offers")
 
-print("[ПРОЦЕСС] Расчет цен и формирование XML...")
 for sku, base_price_str in products_data:
     offer_node = ET.SubElement(offers_node, "offer", {"sku": sku})
     ET.SubElement(offer_node, "model").text = f"Товар {sku}"
     ET.SubElement(offer_node, "brand").text = "Noname"
-
-    try:
+    
+    try: 
         base_price = float(base_price_str)
-    except ValueError:
+    except ValueError: 
         base_price = 5000.0
 
     item_info = sima_data_dict.get(sku, {"balance": 0, "weight_kg": 0.0, "volume_m3": 0.0})
     shipping_surcharge = max(item_info["weight_kg"] * TARIF_PER_KG, item_info["volume_m3"] * TARIF_PER_M3)
     total_item_cost = base_price + shipping_surcharge
-
     min_allowed_price = round(((total_item_cost * 1.25) + 1500 + 1000) / 0.80, -1)
     start_selling_price = round(total_item_cost * 2.35, -1)
-
     final_xml_price = start_selling_price
 
-    if ENABLE_DUMPING and KASPI_API_TOKEN != "ТВОЙ_API_КЛЮЧ_КАСПИ":
-        competitor_price = get_kaspi_competitors(sku)
-        if competitor_price is not None:
-            target_price = competitor_price - PRICE_STEP
-            if target_price >= min_allowed_price:
-                final_xml_price = target_price
-                update_kaspi_price(sku, target_price)
-            else:
-                final_xml_price = min_allowed_price
-                update_kaspi_price(sku, min_allowed_price)
-
     ET.SubElement(offer_node, "price").text = str(int(final_xml_price))
-
     availabilities_node = ET.SubElement(offer_node, "availabilities")
     if item_info["balance"] < MIN_STOCK_THRESHOLD:
         ET.SubElement(availabilities_node, "availability", {"available": "no", "storeId": "PP4"})
     else:
         ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
 
-# =====================================================================
-# ФИНАЛЬНАЯ ЗАПИСЬ В ФАЙЛ
-# =====================================================================
-raw_xml_bytes = ET.tostring(root, encoding="utf-8")
-raw_xml_text = raw_xml_bytes.decode("utf-8")
+# Сохранение итогового XML в файл
+final_output = ET.tostring(root_kaspi, encoding="utf-8", xml_declaration=True).decode("utf-8")
+final_output += f'<!-- Updated at {datetime.now().second} seconds past the minute -->\n'
 
-raw_xml_text = re.sub(r'^<kaspi_catalog[^>]*>', '', raw_xml_text)
-raw_xml_text = re.sub(r'<\?xml[^>]*\?>', '', raw_xml_text)
-raw_xml_text = raw_xml_text.strip()
-
-perfect_header = (
-    '<?xml version="1.0" encoding="utf-8"?>\n'
-    f'<kaspi_catalog date="{current_date}" xmlns="http://kaspi.kz" '
-    'xmlns:xsi="http://w3.org" '
-    'xsi:schemaLocation="http://kaspi.kz http://kaspi.kz.xsd">\n'
-)
-
-if not raw_xml_text.startswith('<kaspi_catalog'):
-    body_text = re.sub(r'^<kaspi_catalog>', '', raw_xml_text)
-    final_output = perfect_header + body_text
-else:
-    final_output = perfect_header + raw_xml_text
-
-with open(OUTPUT_XML, "w", encoding="utf-8") as f:
+with open(OUTPUT_XML, "w", encoding="utf-8") as f: 
     f.write(final_output)
-
-with open(OUTPUT_XML, "a", encoding="utf-8") as f:
-    f.write(f"\n<!-- ForceUpdate: {timestamp_comment} -->")
-
-print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
