@@ -134,14 +134,7 @@ print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно
 current_date = datetime.now().strftime("%d.%m.%Y")
 timestamp_comment = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
-# Нативная бескостыльная генерация заголовка через ElementTree
-ET.register_namespace('', "http://kaspi.kz")
-ET.register_namespace('xsi', "http://w3.org")
-
-root = ET.Element("kaspi_catalog", {
-    "date": current_date,
-    "{http://w3.org}schemaLocation": "http://kaspi.kz http://kaspi.kz.xsd"
-})
+root = ET.Element("kaspi_catalog")
 
 ET.SubElement(root, "company")
 merchant_id = ET.SubElement(root, "merchantid")
@@ -187,37 +180,35 @@ for sku, base_price_str in products_data:
     else:
         ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
 
-# Запись структуры
 # =====================================================================
 # ФИНАЛЬНАЯ ЗАПИСЬ В ФАЙЛ (ЧИСТЫЙ ТЕКСТ БЕЗ КОСЯКОВ ЛИБРАРИЙ PYTHON)
 # =====================================================================
-# Сначала переводим собранное дерево в обычную строку
 raw_xml_bytes = ET.tostring(root, encoding="utf-8")
 raw_xml_text = raw_xml_bytes.decode("utf-8")
 
-# Вырезаем абсолютно всё, что Python сгенерировал вокруг главного тега
 raw_xml_text = re.sub(r'^<kaspi_catalog[^>]*>', '', raw_xml_text)
-# Убираем возможный дубль декларации xml
 raw_xml_text = re.sub(r'<\?xml[^>]*\?>', '', raw_xml_text)
-# Очищаем от возможных кривых закрывающих тегов каталога в начале
 raw_xml_text = raw_xml_text.strip()
 
-# Строим ЭТАЛОННУЮ шапку, скопированную из официального гайда Kaspi
+# ЭТАЛОННАЯ ШАПКА: Все ссылки и кавычки защищены от сбоев интерпретатора
 perfect_header = (
     '<?xml version="1.0" encoding="utf-8"?>\n'
-    f'<kaspi_catalog date="{current_date}">\n'
+    f'<kaspi_catalog date="{current_date}" xmlns="http://kaspi.kz" '
+    'xmlns:xsi="http://w3.org" '
+    'xsi:schemaLocation="http://kaspi.kz http://kaspi.kz.xsd">\n'
 )
 
-# Собираем файл заново: идеальная шапка + тело xml
 if not raw_xml_text.startswith('<kaspi_catalog'):
-    # Если ElementTree создал тег без атрибутов в корне
     body_text = re.sub(r'^<kaspi_catalog>', '', raw_xml_text)
     final_output = perfect_header + body_text
 else:
     final_output = perfect_header + raw_xml_text
 
-# Принудительно сохраняем как чистый текст
 with open(OUTPUT_XML, "w", encoding="utf-8") as f:
     f.write(final_output)
+
+# Дописываем уникальную временную метку для форсирования коммита в репозиторий
+with open(OUTPUT_XML, "a", encoding="utf-8") as f:
+    f.write(f"\n<!-- ForceUpdate: {timestamp_comment} -->")
 
 print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
