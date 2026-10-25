@@ -134,7 +134,7 @@ print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно
 current_date = datetime.now().strftime("%d.%m.%Y")
 timestamp_comment = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
-# Регистрация пространств имен для Kaspi XSD
+# Нативная бескостыльная генерация заголовка через ElementTree
 ET.register_namespace('', "http://kaspi.kz")
 ET.register_namespace('xsi', "http://w3.org")
 
@@ -192,8 +192,7 @@ tree = ET.ElementTree(root)
 ET.indent(tree, space="    ", level=0)
 tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
 
-# ИНЖЕНЕРНЫЙ ХАК: Дописываем уникальный текстовый комментарий с датой в конец файла,
-# чтобы GitHub гарантированно зафиксировал изменения и обновил файл.
+# Дописываем уникальную временную метку для форсирования коммита в репозиторий
 with open(OUTPUT_XML, "a", encoding="utf-8") as f:
     f.write(f"\n<!-- ForceUpdate: {timestamp_comment} -->")
 
