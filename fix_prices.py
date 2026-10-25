@@ -63,7 +63,6 @@ print(f"\n====================================================================="
 print(f"СТАРТ СЕССИИ ОБНОВЛЕНИЯ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"=====================================================================")
 
-# ИСПРАВЛЕНО: Убрали слепой автоматический поиск. Жестко привязываемся к вашему файлу базы.
 base_file_name = "sima.xml.xml"
 
 if not os.path.exists(base_file_name):
@@ -77,19 +76,38 @@ except Exception as e:
     print(f"\n[КРИТИЧЕСКАЯ ОШИБКА] Не удалось прочитать файл базы: {e}")
     exit()
 
-# Универсальный поиск товаров: ищет любые теги offer/item с артикулом (sku или id)
-offers_raw = re.findall(r'<offer[^>]*sku="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
-if not offers_raw:
-    # Запасной вариант парсинга, если в базе вместо sku используется id или тег item
-    offers_raw = re.findall(r'<offer[^>]*id="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
+# ВСЕЯДНЫЙ ПОИСК: Ищет любые вариации тегов Сима-Ленд (offer, item, product) и любые артикулы (sid, sku, id)
+products_data = []
 
-if not offers_raw:
-    print("\n[КРИТИЧЕСКАЯ ОШИБКА] В файле базы товаров не найдены теги предложений <offer>!")
+# Вариант 1: Ищем стандартные теги Сима-Ленд <item sid="..." ...> <price>...</price>
+items_raw = re.findall(r'<item[^>]*sid="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
+for sku, price in items_raw:
+    products_data.append((sku.strip(), price.strip()))
+
+# Вариант 2: Если не нашли, ищем <offer sku="..."> <price>...</price>
+if not products_data:
+    offers_raw = re.findall(r'<offer[^>]*sku="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
+    for sku, price in offers_raw:
+        products_data.append((sku.strip(), price.strip()))
+
+# Вариант 3: Если не нашли, ищем <offer id="..."> <price>...</price>
+if not products_data:
+    offers_id_raw = re.findall(r'<offer[^>]*id="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
+    for sku, price in offers_id_raw:
+        products_data.append((sku.strip(), price.strip()))
+
+# Вариант 4: Самый глубокий поиск по любым артикулам sid="число" и цене
+if not products_data:
+    universal_raw = re.finditer(r'sid="(\d+)".*?<price>([\d.]+)</price>', best_content, re.DOTALL)
+    for match in universal_raw:
+        products_data.append((match.group(1), match.group(2)))
+
+if not products_data:
+    print("\n[КРИТИЧЕСКАЯ ОШИБКА] Скрипт не смог распознать структуру товаров в вашем XML. Проверьте теги цены и артикула!")
     exit()
 
-products_data = [(sku.strip(), price.strip()) for sku, price in offers_raw]
 total_items = len(products_data)
-print(f"[ИНФО] База '{base_file_name}' успешно считана ({total_items} позиций).")
+print(f"[ИНФО] База '{base_file_name}' успешно распознана и считана ({total_items} позиций).")
 
 # 3. ПОЛУЧЕНИЕ ДАННЫХ ИЗ API СИМА-ЛЕНД V3 (ОСТАТКИ + ГАБАРИТЫ)
 print("[API] Запрашиваем остатки и габариты у Сима-Ленд пачками...")
