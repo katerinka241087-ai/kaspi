@@ -1,35 +1,128 @@
-name: Update Kaspi Catalog
+```yaml
+name: Update Kaspi Price List
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # каждые 2 часа
+    # Запуск каждые 2 часа.
+    # Время cron указывается в UTC.
+    - cron: "0 */2 * * *"
+
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: kaspi-price-update
+  cancel-in-progress: false
+
 jobs:
-  update_catalog:
+  update-prices:
+    name: Update Sima-Land prices
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.8'  # используйте нужную версию Python
-      
+          python-version: "3.12"
+          cache: "pip"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          python -m pip install requests
 
-      - name: Run fix_prices.py
-        run: python fix_prices.py
-      
-      - name: Commit and Push changes
+      - name: Validate required files
         run: |
-          git config --global user.email "you@example.com"
-          git config --global user.name "Your Name"
+          set -e
+
+          if [ ! -f "fix_prices.py" ]; then
+            echo "::error::fix_prices.py not found"
+            exit 1
+          fi
+
+          if [ ! -f "sima.xml.xml" ]; then
+            echo "::error::sima.xml.xml not found"
+            exit 1
+          fi
+
+      - name: Run price update
+        env:
+          KASPI_API_TOKEN: ${{ secrets.KASPI_API_TOKEN }}
+        run: |
+          set -e
+          python -u fix_prices.py
+
+      - name: Validate generated XML
+        run: |
+          set -e
+
+          if [ ! -s "kaspi.xml" ]; then
+            echo "::error::kaspi.xml is missing or empty"
+            exit 1
+          fi
+
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          filename = "kaspi.xml"
+
+          try:
+              tree = ET.parse(filename)
+              root = tree.getroot()
+          except ET.ParseError as exc:
+              raise SystemExit(
+                  f"Generated XML is invalid: {exc}"
+              )
+
+          expected_root = "{http://kaspi.kz}kaspi_catalog"
+
+          if root.tag != expected_root:
+              raise SystemExit(
+                  f"Unexpected root element: {root.tag}"
+              )
+
+          offers = root.find(
+              "{http://kaspi.kz}offers"
+          )
+
+          if offers is None:
+              raise SystemExit(
+                  "The generated XML does not contain offers."
+              )
+
+          print(
+              f"XML is well-formed. Offers: {len(offers)}"
+          )
+          PY
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit generated XML
+        run: |
+          set -e
+
           git add kaspi.xml
-          git commit -m "Update kaspi.xml at $(date +%Y-%m-%d\ %H:%M:%S)"
-          git push origin main
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Automated Kaspi price list update"
+          fi
+
+      - name: Push changes to main
+        run: |
+          set -e
+
+          git push origin HEAD:main || echo "No changes"
+```
