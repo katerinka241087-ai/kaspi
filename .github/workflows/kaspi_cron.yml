@@ -24,9 +24,10 @@ jobs:
     - name: Run Script
       run: python fix_prices.py
 
-    - name: Commit and Push XML
+    - name: Commit and Push changes
       run: |
-        git config --global user.name "Kaspi Cloud Bot"
-        git config --global user.email "cloud-bot@kaspi.local"
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@://github.com"
         git add kaspi.xml
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Авто-обновление из облака: $(date +'%Y-%m-%d %H:%M:%S')" && git push)
+        git diff-index --quiet HEAD || git commit -m "Автоматическое обновление прайса Kaspi"
+        git push
