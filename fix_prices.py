@@ -188,12 +188,36 @@ for sku, base_price_str in products_data:
         ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
 
 # Запись структуры
-tree = ET.ElementTree(root)
-ET.indent(tree, space="    ", level=0)
-tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
+# =====================================================================
+# ФИНАЛЬНАЯ ЗАПИСЬ В ФАЙЛ (ЧИСТЫЙ ТЕКСТ БЕЗ КОСЯКОВ ЛИБРАРИЙ PYTHON)
+# =====================================================================
+# Сначала переводим собранное дерево в обычную строку
+raw_xml_bytes = ET.tostring(root, encoding="utf-8")
+raw_xml_text = raw_xml_bytes.decode("utf-8")
 
-# Дописываем уникальную временную метку для форсирования коммита в репозиторий
-with open(OUTPUT_XML, "a", encoding="utf-8") as f:
-    f.write(f"\n<!-- ForceUpdate: {timestamp_comment} -->")
+# Вырезаем абсолютно всё, что Python сгенерировал вокруг главного тега
+raw_xml_text = re.sub(r'^<kaspi_catalog[^>]*>', '', raw_xml_text)
+# Убираем возможный дубль декларации xml
+raw_xml_text = re.sub(r'<\?xml[^>]*\?>', '', raw_xml_text)
+# Очищаем от возможных кривых закрывающих тегов каталога в начале
+raw_xml_text = raw_xml_text.strip()
+
+# Строим ЭТАЛОННУЮ шапку, скопированную из официального гайда Kaspi
+perfect_header = (
+    '<?xml version="1.0" encoding="utf-8"?>\n'
+    f'<kaspi_catalog date="{current_date}">\n'
+)
+
+# Собираем файл заново: идеальная шапка + тело xml
+if not raw_xml_text.startswith('<kaspi_catalog'):
+    # Если ElementTree создал тег без атрибутов в корне
+    body_text = re.sub(r'^<kaspi_catalog>', '', raw_xml_text)
+    final_output = perfect_header + body_text
+else:
+    final_output = perfect_header + raw_xml_text
+
+# Принудительно сохраняем как чистый текст
+with open(OUTPUT_XML, "w", encoding="utf-8") as f:
+    f.write(final_output)
 
 print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
