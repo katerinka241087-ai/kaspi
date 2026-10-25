@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import requests
 
 # =====================================================================
-# НАСТНОЙКИ КАСПИ И ТАРИФОВ ДОСТАВКИ СИМА-ЛЕНД
+# НАСТРОЙКИ КАСПИ И ТАРИФОВ ДОСТАВКИ СИМА-ЛЕНД
 # =====================================================================
 OUTPUT_XML = "kaspi.xml"
 MERCHANT_ID = "30332535"
@@ -63,42 +63,33 @@ print(f"\n====================================================================="
 print(f"СТАРТ СЕССИИ ОБНОВЛЕНИЯ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print(f"=====================================================================")
 
-# 1. ПОИСК ИСХОДНОГО ФАЙЛА С БАЗОЙ ТОВАРОВ
-all_files = os.listdir(".")
-best_file = None
-max_offers = 0
-best_content = ""
+# ИСПРАВЛЕНО: Убрали слепой автоматический поиск. Жестко привязываемся к вашему файлу базы.
+base_file_name = "sima.xml.xml"
 
-for filename in all_files:
-    # ИСПРАВЛЕНО: Теперь скрипт игнорирует ТОЛЬКО себя и строго имя kaspi.xml, не трогая sima.xml.xml
-    if filename == "fix_prices.py" or filename == OUTPUT_XML or os.path.isdir(filename):
-        continue
-    try:
-        with open(filename, "r", encoding="utf-8", errors="ignore") as f:
-            test_content = f.read()
-            offers_found = re.findall(r'<offer sku="(.*?)">', test_content)
-            if len(offers_found) > max_offers:
-                max_offers = len(offers_found)
-                best_file = filename
-                best_content = test_content
-    except Exception:
-        continue
-
-if not best_file or max_offers == 0:
-    print("\n[КРИТИЧЕСКАЯ ОШИБКА] В папке не найден файл с вашей базой товаров!")
+if not os.path.exists(base_file_name):
+    print(f"\n[КРИТИЧЕСКАЯ ОШИБКА] Файл '{base_file_name}' отсутствует в корне репозитория!")
     exit()
 
-print(f"[ИНФО] Выбран файл базы товаров: '{best_file}'")
+try:
+    with open(base_file_name, "r", encoding="utf-8", errors="ignore") as f:
+        best_content = f.read()
+except Exception as e:
+    print(f"\n[КРИТИЧЕСКАЯ ОШИБКА] Не удалось прочитать файл базы: {e}")
+    exit()
 
-# 2. ИЗВЛЕКАЕМ SKU И ИСХОДНЫЕ ЦЕНЫ ИЗ ЛОКАЛЬНОЙ БАЗЫ
-offers_raw = re.findall(r'<offer sku="(.*?)">.*?<price>(.*?)</price>', best_content, re.DOTALL)
-products_data = []
+# Универсальный поиск товаров: ищет любые теги offer/item с артикулом (sku или id)
+offers_raw = re.findall(r'<offer[^>]*sku="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
+if not offers_raw:
+    # Запасной вариант парсинга, если в базе вместо sku используется id или тег item
+    offers_raw = re.findall(r'<offer[^>]*id="([^"]+)"[^>]*>.*?<price>([^<]+)</price>', best_content, re.DOTALL)
 
-for sku, price in offers_raw:
-    products_data.append((sku.strip(), price.strip()))
+if not offers_raw:
+    print("\n[КРИТИЧЕСКАЯ ОШИБКА] В файле базы товаров не найдены теги предложений <offer>!")
+    exit()
 
+products_data = [(sku.strip(), price.strip()) for sku, price in offers_raw]
 total_items = len(products_data)
-print(f"[ИНФО] База успешно считана ({total_items} позиций).")
+print(f"[ИНФО] База '{base_file_name}' успешно считана ({total_items} позиций).")
 
 # 3. ПОЛУЧЕНИЕ ДАННЫХ ИЗ API СИМА-ЛЕНД V3 (ОСТАТКИ + ГАБАРИТЫ)
 print("[API] Запрашиваем остатки и габариты у Сима-Ленд пачками...")
