@@ -133,15 +133,19 @@ print(f"\n[УСПЕХ] Все данные от Сима-Ленд успешно
 # 4. СБОРКА ИТОГОВОГО XML И УМНЫЙ ДЕМПИНГ
 current_date = datetime.now().strftime("%d.%m.%Y")
 
-root = ET.Element("kaspi_catalog")
+# ИНЖЕНЕРНОЕ РЕШЕНИЕ: Регистрация пространств имен для предотвращения генерации ns0 префиксов
+ET.register_namespace('', "http://kaspi.kz")
+ET.register_namespace('xsi', "http://w3.org")
+
+root = ET.Element("kaspi_catalog", {
+    "date": current_date,
+    "{http://w3.org}schemaLocation": "http://kaspi.kz http://kaspi.kz.xsd"
+})
 
 ET.SubElement(root, "company")
 merchant_id = ET.SubElement(root, "merchantid")
 merchant_id.text = MERCHANT_ID
 offers_node = ET.SubElement(root, "offers")
-
-preorder_count = 0
-hidden_count = 0
 
 print("[ПРОЦЕСС] Расчет цен и формирование XML...")
 for sku, base_price_str in products_data:
@@ -179,40 +183,12 @@ for sku, base_price_str in products_data:
     availabilities_node = ET.SubElement(offer_node, "availabilities")
     if item_info["balance"] < MIN_STOCK_THRESHOLD:
         ET.SubElement(availabilities_node, "availability", {"available": "no", "storeId": "PP4"})
-        hidden_count += 1
     else:
         ET.SubElement(availabilities_node, "availability", {"available": "yes", "storeId": "PP4", "preorder": "true", "deliveryTime": "12"})
-        preorder_count += 1
 
-# Сохраняем XML файл с принудительной текстовой сборкой правильной шапки Kaspi
+# Прямая чистая запись структуры без промежуточного строкового re.sub
 tree = ET.ElementTree(root)
 ET.indent(tree, space="    ", level=0)
-
-temp_file = "temp_kaspi.xml"
-tree.write(temp_file, encoding="utf-8", xml_declaration=True)
-
-with open(temp_file, "r", encoding="utf-8") as f:
-    xml_content = f.read()
-
-# Вырезаем пустой тег каталога, сгенерированный Python
-xml_content = re.sub(r'<kaspi_catalog[^>]*>', '', xml_content)
-
-# Собираем идеальный заголовок строго по спецификации Kaspi XSD
-final_xml_header = (
-    f'<?xml version="1.0" encoding="utf-8"?>\n'
-    f'<kaspi_catalog date="{current_date}" xmlns="http://kaspi.kz" '
-    f'xmlns:xsi="http://w3.org" '
-    f'xsi:schemaLocation="http://kaspi.kz http://kaspi.kz.xsd">'
-)
-
-# Выполняем чистую замену
-final_content = xml_content.replace("""<?xml version='1.0' encoding='utf-8'?>""", final_xml_header)
-final_content = final_content.replace("""<?xml version="1.0" encoding="utf-8"?>""", final_xml_header)
-
-with open(OUTPUT_XML, "w", encoding="utf-8") as f:
-    f.write(final_content)
-
-if os.path.exists(temp_file):
-    os.remove(temp_file)
+tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
 
 print(f"[ФИНАЛ] СЕССИЯ ЗАВЕРШЕНА. Файл '{OUTPUT_XML}' успешно обновлен!")
